@@ -42,6 +42,7 @@ class EvalState(EpochState, Extension):
                 f"losses/{eval_datasource_name}/loss",
                 self.cumm_loss.detach().item() / self.sample_num,
                 train_manager["train_state"].epoch_num,
+                smoothing=False,
             )
 
 

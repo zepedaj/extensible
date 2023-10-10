@@ -48,7 +48,7 @@ class TrainManager(Extensible):
         super().__init__(self.extensions)
 
         # Copy the eval data dictionary
-        self.eval_data = OrderedDict_(self.eval_data)
+        self.eval_data = OrderedDict_(self.eval_data or {})
 
         # Add the default extensions
         self.add_extension("eval_state", EvalState(), at_start=True, as_default=True)
@@ -108,7 +108,7 @@ class TrainManager(Extensible):
 
     def loss_forward(self, batch, prediction) -> ScalarTensor:
         """
-        .. todo:: This method likely needs to be overloaded to extract the correct model input from the batch and the model's prediction.
+        .. note:: This method likely needs to be overloaded to extract the correct model input from the batch and the model's prediction.
 
         .. note:: Unless an explicit implementation is provided in a derived class, this method takes the place of both :meth:`train_loss_forward` and :meth:`eval_loss_forward`.
         """
@@ -134,21 +134,25 @@ class TrainManager(Extensible):
             self.model.train(current_training_mode)
 
     def eval(self, eval_data: Optional[Dict[str, DataSource]] = None):
-        #
         if (eval_data or self.eval_data) is None:
             return
 
         #
-        with self.mode("eval"), self.staged("eval"):
-            if "train_manager" not in self.fixtures:
-                # Stand alone evaluation not within a call to train
-                self.fixtures.update({"train_manager": self, "writer": self.writer})
+        with self.mode("eval"), self.staged(
+            "eval",
+            fixtures={"eval_state": self["eval_state"]},
+            defaults={  # In case this is a stand-alone eval.
+                "train_manager": self,
+                "writer": self.writer,
+                "fixtures": self.fixtures,
+            },
+        ):
             #
             for datasource_name, datasource in (eval_data or self.eval_data).items():
                 with self.staged(
                     "eval_step_epoch", {"eval_datasource_name": datasource_name}
                 ):
-                    for batch in tqdm(datasource):
+                    for batch in tqdm(datasource, desc="Eval"):
                         with self.staged("eval_step_batch", {"batch": batch}):
                             prediction = self.eval_model_forward(batch)
                             self.fixtures["prediction"] = prediction
@@ -157,16 +161,22 @@ class TrainManager(Extensible):
                             self.fixtures["loss"] = loss
 
     def train(self):
-        with self.mode("train"), self.staged("train"):
-            self.fixtures.update({"train_manager": self, "writer": self.writer})
-
+        with self.mode("train"), self.staged(
+            "train",
+            {
+                "train_manager": self,
+                "writer": self.writer,
+                "fixtures": self.fixtures,
+                "train_state": self["train_state"],
+            },
+        ):
             # Eval before all training
             self.eval()
 
             # Train
-            for _ in range(self.epochs):
+            for epoch_num in range(self.epochs):
                 with self.staged("train_step_epoch"):
-                    for batch in tqdm(self.train_data):
+                    for batch in tqdm(self.train_data, desc=f"Train epoch {epoch_num}"):
                         with self.staged("train_step_batch", {"batch": batch}):
                             prediction = self.train_model_forward(batch)
                             self.fixtures["prediction"] = prediction

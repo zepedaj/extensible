@@ -87,18 +87,28 @@ class Extensible:
         ]
 
     @contextmanager
-    def staged(self, stage_name, pre_fixtures: Optional[Dict[str, Any]] = None):
+    def staged(
+        self,
+        stage_name,
+        fixtures: Optional[Dict[str, Any]] = None,
+        defaults: Optional[Dict[str, Any]] = None,
+    ):
         """
         Context manager containing the code for the center stage. All pre and post methods from all extensions will be called before and after the context.
 
         :param stage_name: The name of the stage. Extensions can implement methods named `f"pre_{stage_name}"` or `f"post_{stage_name}"` that will be called in the pre and post substages.
-        :param pre_fixtures: Constains fixtures that will be cleaned up at the end of the stage and that are available to the pre substage. Note that any fixtures provided here that
+        :param fixtures: Constains fixtures that will be cleaned up at the end of the stage and that are available to the pre substage. Note that any fixtures provided here that
         were already handled by a parent stage will be set to the specified value but will not be cleaned up at the end of this stage.
+        :param pre_defaults: Similar to ``fixtures`` but assigned only if the corresponding fixture does not yet exist. Those that get assigned will be cleared at the end of the stage.
         """
 
         # Start recording added fixtures
         self.fixtures.start_stage()
-        self.fixtures.update(pre_fixtures or {})
+        self.fixtures.update(fixtures or {})
+        [
+            self.fixtures.setdefault(key, value)
+            for key, value in (defaults or {}).items()
+        ]
 
         # Call pre methods
         for _meth in self.get_extension_methods("pre", stage_name):
