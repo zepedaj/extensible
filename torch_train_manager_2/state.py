@@ -25,30 +25,23 @@ class EpochState:
 
 
 class EvalState(EpochState, Extension):
-    datasource_name: str
     visualize: bool
 
     def __init__(self, visualize: bool = True):
         self.visualize = visualize
 
-    def pre_eval_step_datasource(self, datasource_name, datasource):
-        self.datasource_name = datasource_name
+    def pre_eval_step_epoch(self):
         self.reset()
 
-    def post_eval_step_batch(self, batch, out):
-        prediction, loss_value = out
-        self.update(self.train_manager.get_true_batch_size(batch), loss_value)
+    def post_eval_step_batch(self, train_manager, batch, loss):
+        self.update(train_manager.get_true_batch_size(batch), loss)
 
-    def post_eval_step_datasource(self, datasource_name, datasource, out):
-        if datasource_name != self.datasource_name:
-            raise ValueError(
-                f"Data source name does not match (`{datasource_name}!={self.datasource_name}`)"
-            )
+    def post_eval_step_epoch(self, eval_datasource_name, train_manager):
         if self.visualize:
-            self.train_manager.writer.add_scalar(
-                f"losses/{self.datasource_name}/loss",
+            train_manager.writer.add_scalar(
+                f"losses/{eval_datasource_name}/loss",
                 self.cumm_loss.detach().item() / self.sample_num,
-                self.train_manager["train_state"].epoch_num,
+                train_manager["train_state"].epoch_num,
             )
 
 
@@ -63,14 +56,14 @@ class TrainState(Extension):
     epoch_state: EpochState = field(default_factory=EpochState)
     """ The state of the current epoch """
 
-    def pre_train_step_epoch(self, *_, **__):
+    def pre_train_step_epoch(self):
         self.epoch_state.reset()
 
-    def post_train_step_batch(self, batch, out):
-        prediction, loss_value = out
-        self.epoch_state.update(
-            self.train_manager.get_true_batch_size(batch), loss_value
-        )
+    def post_train_step_batch(self, train_manager, batch, loss):
+        num_samples = train_manager.get_true_batch_size(batch)
+        self.epoch_state.update(num_samples, loss)
+        self.running_batch_num += 1
+        self.running_sample_num += num_samples
 
-    def post_train_step_epoch(self, *_, **__):
+    def post_train_step_epoch(self):
         self.epoch_num += 1

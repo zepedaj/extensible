@@ -23,6 +23,9 @@ class TrainManager(Extensible):
     train_data: DataSource
     eval_data: Optional[Dict[str, DataSource]] = None
     extensions: OrderedDict[str, Extension] = field(default_factory=OrderedDict_)
+    """ User-provided extensions. If not included, extensions with keys ``'eval_state'`` and ``'train_state'`` are added
+    at the front, with instances of :class:`EvalState` and :class:`TrainState`, respectively. The ``'eval_state'`` extension
+    will reset when starting evaluation over each dataset. The ``'train_state'`` evaluation is not reset for the duration of training."""
     writer: ploteries.Writer = field(
         default_factory=lambda: ploteries.Writer(Path(f"./{str(datetime.now())}.pltr"))
     )
@@ -67,7 +70,7 @@ class TrainManager(Extensible):
 
     def get_true_batch_size(self, batch: Batch) -> int:
         """
-        .. warning::
+        .. note::
             When keeping track of the total number of samples, this method needs to be implemented.
             It should return the actual batch size, which might be different from the nominal size, particularly for the last batch in the epoch.
             By default, it will return ``1``, meaning that it counts batches instead of batch sizes.
@@ -95,6 +98,12 @@ class TrainManager(Extensible):
         """
         return self.model(batch)
 
+    def train_model_forward(self, *args, **kwargs):
+        return self.model_forward(*args, **kwargs)
+
+    def eval_model_forward(self, *args, **kwargs):
+        return self.model_forward(*args, **kwargs)
+
     #### LOSS FORWARD
 
     def loss_forward(self, batch, prediction) -> ScalarTensor:
@@ -105,35 +114,11 @@ class TrainManager(Extensible):
         """
         return self.loss(batch, prediction)
 
-    #### STEP BATCH
+    def train_loss_forward(self, *args, **kwargs):
+        return self.loss_forward(*args, **kwargs)
 
-    def eval_step_batch(self, batch):
-        prediction = self.staged_call("eval_model_forward", batch)
-        loss_value = self.staged_call("eval_loss_forward", batch, prediction)
-        return prediction, loss_value
-
-    def train_step_batch(self, batch):
-        prediction = self.staged_call("train_model_forward", batch)
-        loss_value = self.staged_call("train_loss_forward", batch, prediction)
-        self.optimizer.zero_grad()
-        loss_value.backward()
-        self.optimizer.step()
-        return prediction, loss_value
-
-    #### STEP EPOCH
-
-    def eval_step_epoch(self, datasource):
-        for k_batch, batch in enumerate(tqdm(datasource)):
-            self.staged_call("eval_step_batch", batch)
-
-    def train_step_epoch(self, datasource):
-        for k_batch, batch in enumerate(tqdm(datasource)):
-            self.staged_call("train_step_batch", batch)
-
-    #### STEP DATASOURCE
-
-    def eval_step_datasource(self, datasource_name, datasource):
-        return self.staged_call("eval_step_epoch", datasource)
+    def eval_loss_forward(self, *args, **kwargs):
+        return self.loss_forward(*args, **kwargs)
 
     #### TRAIN AND EVAL
 
@@ -148,20 +133,50 @@ class TrainManager(Extensible):
         finally:
             self.model.train(current_training_mode)
 
-    def eval(self):
+    def eval(self, eval_data: Optional[Dict[str, DataSource]] = None):
         #
-        if self.eval_data is None:
+        if (eval_data or self.eval_data) is None:
             return
 
         #
-        with self.mode("eval"):
-            for datasource_name, datasource in self.eval_data.items():
-                self.staged_call("eval_step_datasource", datasource_name, datasource)
+        with self.mode("eval"), self.staged("eval"):
+            if "train_manager" not in self.fixtures:
+                # Stand alone evaluation not within a call to train
+                self.fixtures.update({"train_manager": self, "writer": self.writer})
+            #
+            for datasource_name, datasource in (eval_data or self.eval_data).items():
+                with self.staged(
+                    "eval_step_epoch", {"eval_datasource_name": datasource_name}
+                ):
+                    for batch in tqdm(datasource):
+                        with self.staged("eval_step_batch", {"batch": batch}):
+                            prediction = self.eval_model_forward(batch)
+                            self.fixtures["prediction"] = prediction
+
+                            loss = self.eval_loss_forward(batch, prediction)
+                            self.fixtures["loss"] = loss
 
     def train(self):
-        with self.mode("train"):
+        with self.mode("train"), self.staged("train"):
+            self.fixtures.update({"train_manager": self, "writer": self.writer})
+
+            # Eval before all training
             self.eval()
+
             # Train
-            for _ in tqdm(range(self.epochs)):
-                self.staged_call("train_step_epoch", self.train_data)
+            for _ in range(self.epochs):
+                with self.staged("train_step_epoch"):
+                    for batch in tqdm(self.train_data):
+                        with self.staged("train_step_batch", {"batch": batch}):
+                            prediction = self.train_model_forward(batch)
+                            self.fixtures["prediction"] = prediction
+
+                            loss = self.train_loss_forward(batch, prediction)
+                            self.fixtures["loss"] = loss
+
+                            self.optimizer.zero_grad()
+                            loss.backward()
+                            self.optimizer.step()
+
+                # Eval after every epoch
                 self.eval()
