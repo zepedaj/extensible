@@ -1,7 +1,7 @@
 from collections import OrderedDict as OrderedDict_
 from typing import OrderedDict as OrderedDict
 from contextlib import contextmanager, nullcontext
-from dataclasses import dataclass, field
+from dataclasses import InitVar, dataclass, field
 from datetime import datetime
 from pathlib import Path
 from typing import Callable, Dict, Optional, Union
@@ -10,9 +10,13 @@ import torch.optim
 from torch import nn
 from tqdm import tqdm
 
-from torch_train_manager_2.state import EvalState
+from torch_train_manager_2.state import CheckpointSaver, EvalState
 from .defs import *
 from .extensions import Extensible, Extension
+
+
+class Unassigned:
+    pass
 
 
 @dataclass
@@ -26,9 +30,8 @@ class TrainManager(Extensible):
     """
     User-provided extensions. If an extension with key ``'eval_state'`` is not included, it is added by default as an instance of :class:`EvalState`.
     """
-    writer: ploteries.Writer = field(
-        default_factory=lambda: ploteries.Writer(Path(f"./{str(datetime.now())}.pltr"))
-    )
+    output_dir: Path = Path(f"./{str(datetime.now())}")
+    writer: ploteries.Writer = Unassigned
     device: Union[torch.device, str] = torch.device(
         "cuda:0" if torch.cuda.is_available() else "cpu:0"
     )
@@ -43,15 +46,30 @@ class TrainManager(Extensible):
     ] = torch.optim.Adam
     lr_schedule: Optional[LRSchedule] = None
     mode_name: str = field(init=False)
+    load_ckpt: InitVar[bool] = False
 
-    def __post_init__(self):
+    def __post_init__(self, load_ckpt):
         super().__init__(self.extensions)
 
         # Copy the eval data dictionary
         self.eval_data = OrderedDict_(self.eval_data or {})
 
+        # Make the output dir
+        self.output_dir = Path(self.output_dir)
+        self.output_dir.mkdir(exist_ok=True)
+
+        # Set the writer
+        if self.writer is Unassigned:
+            self.writer = ploteries.Writer(self.output_dir / "ploteries.pltr")
+
         # Add the default extensions
         self.add_extension("eval_state", EvalState(), at_start=True, as_default=True)
+        self.add_extension(
+            "ckpt_saver",
+            CheckpointSaver(path=self.output_dir / "checkpoints", load_ckpt=load_ckpt),
+            at_start=False,
+            as_default=True,
+        )
 
         # Setup
         self.setup()
@@ -151,7 +169,7 @@ class TrainManager(Extensible):
                 with self.staged(
                     "eval_step_epoch", {"datasource_name": datasource_name}
                 ):
-                    for batch in tqdm(datasource, desc="Eval"):
+                    for batch in tqdm(datasource, desc=f"Eval({datasource_name})"):
                         with self.staged(
                             "eval_step_batch",
                             {
@@ -176,14 +194,17 @@ class TrainManager(Extensible):
             },
         ):
             # Eval before all training
-            self.eval()
+            if self.fixtures["epoch_num"] == 0:
+                # Extension CheckpointSaver could have set `epoch_num`
+                # to a value other than zero
+                self.eval()
 
             # Train
-            for _ in range(self.epochs):
+            for _ in range(self.fixtures["epoch_num"], self.epochs):
                 with self.staged("train_step_epoch"):
                     for batch in tqdm(
                         self.train_data,
-                        desc=f"Train epoch {self.fixtures['epoch_num']}",
+                        desc=f"Train epoch {self.fixtures['epoch_num']+1}",
                     ):
                         with self.staged(
                             "train_step_batch",
