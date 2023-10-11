@@ -18,14 +18,23 @@ class FixturesDict(UserDict):
         super().__init__(self, *args, **kwargs)
         self.stage_fixtures = []
 
-    def __setitem__(self, key, value):
+    def __setitem__(self, key, value, force=False):
         if not self.stage_fixtures:
             raise Exception("No stage has been started.")
         if key not in self.data:
             # This avoids adding the fixture to the current stage if the stage updates an existing variable
             # e.g., tm.fixtures['count']+=1
             self.stage_fixtures[-1].add(key)
+        elif not force:
+            raise Exception(
+                f"Attempting to create fixture {key} that already exists. Use method `modify` to modify its value."
+            )
         super().__setitem__(key, value)
+
+    def modify(self, key, value):
+        if key not in self.data:
+            raise Exception(f"Cannot modify non-existing fixture `{key}`.")
+        self.__setitem__(key, value, force=True)
 
     def start_stage(self):
         self.stage_fixtures.append(set())

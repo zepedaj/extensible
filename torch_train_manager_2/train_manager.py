@@ -10,7 +10,7 @@ import torch.optim
 from torch import nn
 from tqdm import tqdm
 
-from torch_train_manager_2.state import EvalState, TrainState
+from torch_train_manager_2.state import EvalState
 from .defs import *
 from .extensions import Extensible, Extension
 
@@ -23,9 +23,9 @@ class TrainManager(Extensible):
     train_data: DataSource
     eval_data: Optional[Dict[str, DataSource]] = None
     extensions: OrderedDict[str, Extension] = field(default_factory=OrderedDict_)
-    """ User-provided extensions. If not included, extensions with keys ``'eval_state'`` and ``'train_state'`` are added
-    at the front, with instances of :class:`EvalState` and :class:`TrainState`, respectively. The ``'eval_state'`` extension
-    will reset when starting evaluation over each dataset. The ``'train_state'`` evaluation is not reset for the duration of training."""
+    """
+    User-provided extensions. If an extension with key ``'eval_state'`` is not included, it is added by default as an instance of :class:`EvalState`.
+    """
     writer: ploteries.Writer = field(
         default_factory=lambda: ploteries.Writer(Path(f"./{str(datetime.now())}.pltr"))
     )
@@ -52,7 +52,6 @@ class TrainManager(Extensible):
 
         # Add the default extensions
         self.add_extension("eval_state", EvalState(), at_start=True, as_default=True)
-        self.add_extension("train_state", TrainState(), at_start=True, as_default=True)
 
         # Setup
         self.setup()
@@ -140,20 +139,26 @@ class TrainManager(Extensible):
         #
         with self.mode("eval"), self.staged(
             "eval",
-            fixtures={"eval_state": self["eval_state"]},
             defaults={  # In case this is a stand-alone eval.
                 "train_manager": self,
                 "writer": self.writer,
                 "fixtures": self.fixtures,
+                "epoch_num": 0,
             },
         ):
             #
             for datasource_name, datasource in (eval_data or self.eval_data).items():
                 with self.staged(
-                    "eval_step_epoch", {"eval_datasource_name": datasource_name}
+                    "eval_step_epoch", {"datasource_name": datasource_name}
                 ):
                     for batch in tqdm(datasource, desc="Eval"):
-                        with self.staged("eval_step_batch", {"batch": batch}):
+                        with self.staged(
+                            "eval_step_batch",
+                            {
+                                "batch": batch,
+                                "true_batch_size": self.get_true_batch_size(batch),
+                            },
+                        ):
                             prediction = self.eval_model_forward(batch)
                             self.fixtures["prediction"] = prediction
 
@@ -167,17 +172,26 @@ class TrainManager(Extensible):
                 "train_manager": self,
                 "writer": self.writer,
                 "fixtures": self.fixtures,
-                "train_state": self["train_state"],
+                "epoch_num": 0,
             },
         ):
             # Eval before all training
             self.eval()
 
             # Train
-            for epoch_num in range(self.epochs):
+            for _ in range(self.epochs):
                 with self.staged("train_step_epoch"):
-                    for batch in tqdm(self.train_data, desc=f"Train epoch {epoch_num}"):
-                        with self.staged("train_step_batch", {"batch": batch}):
+                    for batch in tqdm(
+                        self.train_data,
+                        desc=f"Train epoch {self.fixtures['epoch_num']}",
+                    ):
+                        with self.staged(
+                            "train_step_batch",
+                            {
+                                "batch": batch,
+                                "true_batch_size": self.get_true_batch_size(batch),
+                            },
+                        ):
                             prediction = self.train_model_forward(batch)
                             self.fixtures["prediction"] = prediction
 
@@ -187,6 +201,8 @@ class TrainManager(Extensible):
                             self.optimizer.zero_grad()
                             loss.backward()
                             self.optimizer.step()
+
+                    self.fixtures.modify("epoch_num", self.fixtures["epoch_num"] + 1)
 
                 # Eval after every epoch
                 self.eval()
