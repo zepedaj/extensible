@@ -58,7 +58,7 @@ class TestTrainManager:
 
             # Continue training
             tm["ckpt_saver"].load_ckpt = True
-            tm.epochs = 41
+            tm.epochs = orig_epochs + 1
             tm.train()
             assert tm["epochs_gatherer"].trained_epochs == list(
                 range(1, orig_epochs + 2)
@@ -66,7 +66,7 @@ class TestTrainManager:
 
             # Assert all checkpoints were saved
             assert {x.stem for x in tm["ckpt_saver"].path.glob("*")} == {
-                str(k) for k in range(1, tm.epochs + 1)
+                str(k) for k in range(1, orig_epochs + 2)
             }
 
     def test_get_extension_methods(self):

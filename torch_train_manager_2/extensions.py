@@ -94,7 +94,7 @@ class CheckpointSaver(Extension):
         # Check no training has happened
         if not self.load_ckpt and self.get_latest_checkpoint() is not None:
             raise Exception(
-                f"Checkpoints exist for the specified training path {path} -- specify `load_ckpt=True` to continue training"
+                f"Checkpoints exist in the specified path `{self.path}` -- you need to specify `load_ckpt=True` if you wish to continue training"
             )
 
         # Deduce saved attribs if none provided
