@@ -1,4 +1,3 @@
-import cProfile
 from pathlib import Path
 from typing import Optional, Tuple
 from .defs import *
