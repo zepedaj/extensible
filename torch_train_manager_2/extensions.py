@@ -1,137 +1,137 @@
-from collections import OrderedDict as OrderedDict_, UserDict
-from contextlib import contextmanager
-from inspect import getfullargspec, signature
-from typing import Any, Dict, Iterable, List, Optional, OrderedDict as OrderedDict, Set
-from dataclasses import dataclass, field
-import warnings
+import cProfile
+from pathlib import Path
+from typing import Optional, Tuple
+from .defs import *
+from .extensible import Extension
 
 
-class Extension:
-    pass
+class EvalState(Extension):
+    """
+    Exposes the following fixtures:
 
+    * **num_batches**: The cumulative number of batches currently visited during an evaluation epoch.
+    * **num_samples**: The cumulative number of samples currently visited during an evaluation epoch.
+    * **cum_loss**: The sum of all losses for all batches currently visited during an evalution epohc.
 
-class FixturesDict(UserDict):
-    stage_fixtures: List[Set[str]]
-    """ Contains the names of all the fixtures for nested stages """
+    Adds the following visualization at the end of the epoch:
 
-    def __init__(self, *args, **kwargs):
-        super().__init__(self, *args, **kwargs)
-        self.stage_fixtures = []
+    * Cumulative loss divided by the total number of batches in the epoch.
+    """
 
-    def __setitem__(self, key, value, force=False):
-        if not self.stage_fixtures:
-            raise Exception("No stage has been started.")
-        if key not in self.data:
-            # This avoids adding the fixture to the current stage if the stage updates an existing variable
-            # e.g., tm.fixtures['count']+=1
-            self.stage_fixtures[-1].add(key)
-        elif not force:
-            raise Exception(
-                f"Attempting to create fixture {key} that already exists. Use method `modify` to modify its value."
-            )
-        super().__setitem__(key, value)
+    visualize: bool
 
-    def modify(self, key, value):
-        if key not in self.data:
-            raise Exception(f"Cannot modify non-existing fixture `{key}`.")
-        self.__setitem__(key, value, force=True)
+    def __init__(self, visualize: bool = True):
+        self.visualize = visualize
 
-    def start_stage(self):
-        self.stage_fixtures.append(set())
+    def pre_eval_step_epoch(self, fixtures):
+        fixtures.update({"num_batches": 0, "num_samples": 0, "cum_loss": 0.0})
 
-    def end_stage(self):
-        for fixture_name in self.stage_fixtures.pop():
-            self.pop(fixture_name, None)
+    def post_eval_step_batch(self, fixtures, true_batch_size, loss):
+        fixtures.modify("num_batches", fixtures["num_batches"] + 1)
+        fixtures.modify("num_samples", fixtures["num_samples"] + true_batch_size)
+        fixtures.modify("cum_loss", fixtures["cum_loss"] + loss.detach().item())
 
-    def __call__(self, method, **kwargs):
-        arg_names = signature(method).parameters
-        try:
-            params = {key: kwargs.get(key, self[key]) for key in arg_names}
-        except KeyError as err:
-            raise TypeError(
-                f'Failed to supply fixture `{", ".join(err.args)}` when attempting to call `{method}`'
+    def post_eval_step_epoch(
+        self, datasource_name, writer, epoch_num, cum_loss, num_batches
+    ):
+        if self.visualize:
+            writer.add_scalar(
+                f"losses/{datasource_name}/loss",
+                cum_loss / num_batches,
+                epoch_num,
+                smoothing=False,
             )
 
-        return method(**params)
 
+class CheckpointSaver(Extension):
+    ckpt_ext = ".ckpt"
 
-class Extensible:
-    extensions: OrderedDict
-    fixtures: FixturesDict
-    """ Contains all fixtures that will be injected as parameters to extension methods """
-
-    def __init__(self, extensions=None):
-        self.extensions = OrderedDict_(extensions or {})
-        self.fixtures = FixturesDict()
-
-    def add_extension(
-        self, name: str, ext: Extension, at_start=False, as_default=False, warn=True
+    def __init__(
+        self, path, saved_fixtures=("epoch_num",), saved_attribs=None, load_ckpt=False
     ):
-        """
-        Add the specified extension, moving it to the beginning or end of the ordered dictionary containing all the extensions.
-        """
-        if as_default and name in self.extensions:
-            return
-        else:
-            self.extensions[name] = ext
-            self.extensions.move_to_end(name, last=not at_start)
+        self.path = Path(path)
+        self.path.mkdir(exist_ok=True)
+        self.saved_fixtures = saved_fixtures
+        self.saved_attribs = saved_attribs
+        self.load_ckpt = load_ckpt
 
-    def get_extension_methods(self, prefix: str, stage_name: str):
-        """
-        Returns all the extension methods for the specified stage.
+    def filepath(self, epoch_num):
+        return self.path / f"{epoch_num}{self.ckpt_ext}"
 
-        .. rubric:: Examples:
+    def get_latest_checkpoint(self) -> Optional[Tuple[int, Path]]:
+        if ckpt_files := list(self.path.glob(f"*{self.ckpt_ext}")):
+            epoch_num, ckpt_file = max(
+                [(int(_cf.stem), _cf) for _cf in ckpt_files], key=lambda x: x[0]
+            )
+            return epoch_num, ckpt_file
+        return None
 
-        For  ``stage_name='my_stage'``, ``prefix='pre'``, will return all ``'pre_my_stage'`` extension methods that are not ``None``.
+    def load_checkpoint(self, train_manager, fixtures, ckpt_num: int):
+        #
+        saved_values = torch.load(self.filepath(ckpt_num))
+        saved_state_dicts = saved_values["state_dicts"]
 
-        :param stage_name: The name of the stage to get extension methods for.
-        :prefix: Either ``'pre'`` or ``'post'``.
-        """
-
-        ext_method_name = f"{prefix}_{stage_name}"
-        return [
-            _meth
-            for _ext in self.extensions.values()
-            if (_meth := getattr(_ext, ext_method_name, None)) is not None
-        ]
-
-    @contextmanager
-    def staged(
-        self,
-        stage_name,
-        fixtures: Optional[Dict[str, Any]] = None,
-        defaults: Optional[Dict[str, Any]] = None,
-    ):
-        """
-        Context manager containing the code for the center stage. All pre and post methods from all extensions will be called before and after the context.
-
-        :param stage_name: The name of the stage. Extensions can implement methods named `f"pre_{stage_name}"` or `f"post_{stage_name}"` that will be called in the pre and post substages.
-        :param fixtures: Constains fixtures that will be cleaned up at the end of the stage and that are available to the pre substage. Note that any fixtures provided here that
-        were already handled by a parent stage will be set to the specified value but will not be cleaned up at the end of this stage.
-        :param pre_defaults: Similar to ``fixtures`` but assigned only if the corresponding fixture does not yet exist. Those that get assigned will be cleared at the end of the stage.
-        """
-
-        # Start recording added fixtures
-        self.fixtures.start_stage()
-        self.fixtures.update(fixtures or {})
+        # Load states
         [
-            self.fixtures.setdefault(key, value)
-            for key, value in (defaults or {}).items()
+            getattr(train_manager, attrib_name).load_state_dict(
+                saved_state_dicts.pop(attrib_name)
+            )
+            for attrib_name in (self.saved_attribs or [])
         ]
 
-        # Call pre methods
-        for _meth in self.get_extension_methods("pre", stage_name):
-            self.fixtures(_meth)
+        # Check all states were used
+        if saved_state_dicts:
+            raise ValueError(
+                f'Did not use state variables: {", ".join(list(saved_state_dicts))}'
+            )
 
-        # Yield to center stage
-        yield
+        # Set fixtures
+        saved_fixtures = saved_values["fixtures"]
+        for fixture_name in self.saved_fixtures:
+            fixtures.modify(fixture_name, saved_fixtures.pop(fixture_name))
 
-        # Call post methods
-        for _meth in self.get_extension_methods("post", stage_name):
-            self.fixtures(_meth)
+    def pre_train(self, train_manager, fixtures):
+        # Check no training has happened
+        if not self.load_ckpt and self.get_latest_checkpoint() is not None:
+            raise Exception(
+                f"Checkpoints exist for the specified training path {path} -- specify `load_ckpt=True` to continue training"
+            )
 
-        # Remove all stage fixtures
-        self.fixtures.end_stage()
+        # Deduce saved attribs if none provided
+        self.saved_attibs = self.saved_attribs or [
+            attr_name
+            for attr_name in dir(train_manager)
+            if hasattr(getattr(train_manager, attr_name), "state_dict")
+        ]
 
-    def __getitem__(self, name):
-        return self.extensions[name]
+        # Load saved attribs if requested and available
+        if self.load_ckpt and (ckpt := self.get_latest_checkpoint()) is not None:
+            self.load_checkpoint(train_manager, fixtures, ckpt[0])
+
+    def post_train_step_epoch(self, train_manager, fixtures, epoch_num):
+        # Save a checkpoint file
+        torch.save(
+            {
+                "state_dicts": {
+                    attrib_name: getattr(train_manager, attrib_name).state_dict
+                    for attrib_name in (self.saved_attribs or [])
+                },
+                "fixtures": {name: fixtures[name] for name in self.saved_fixtures},
+            },
+            self.filepath(epoch_num),
+        )
+
+
+class CPUProfiler(Extension):
+    """
+    Exposes a ``'profiler'`` fixture that can be used as a context manager to profile areas of code.
+    """
+
+    def __init__(self, output_file="train_manager.prof"):
+        self.output_file = output_file
+
+    def pre_train_manager(self, fixtures):
+        fixtures["cpu_profiler"] = cProfile.Profile()
+
+    def post_train_manager(self, profiler):
+        profiler.dump_stats(self.output_file)

@@ -5,14 +5,15 @@ from dataclasses import InitVar, dataclass, field
 from datetime import datetime
 from pathlib import Path
 from typing import Callable, Dict, Optional, Union
+from pglib.contextlib import reentrant_context_manager
 import ploteries
 import torch.optim
 from torch import nn
 from tqdm import tqdm
 
-from torch_train_manager_2.state import CheckpointSaver, EvalState
+from torch_train_manager_2.extensions import CheckpointSaver, EvalState
 from .defs import *
-from .extensions import Extensible, Extension
+from .extensible import Extensible, Extension
 
 
 class Unassigned:
@@ -150,19 +151,25 @@ class TrainManager(Extensible):
         finally:
             self.model.train(current_training_mode)
 
+    @reentrant_context_manager
+    def train_manager_stage(self):
+        """
+        Wraps both :meth:`train` or stand-alond :meth:`eval calls.
+        """
+        with self.staged(
+            "train_manager",
+            {"train_manager": self, "writer": self.writer, "fixtures": self.fixtures},
+        ):
+            yield
+
     def eval(self, eval_data: Optional[Dict[str, DataSource]] = None):
         if (eval_data or self.eval_data) is None:
             return
 
         #
-        with self.mode("eval"), self.staged(
+        with self.train_manager_stage(), self.mode("eval"), self.staged(
             "eval",
-            defaults={  # In case this is a stand-alone eval.
-                "train_manager": self,
-                "writer": self.writer,
-                "fixtures": self.fixtures,
-                "epoch_num": 0,
-            },
+            defaults={"epoch_num": 0},  # In case this is a stand-alone eval.
         ):
             #
             for datasource_name, datasource in (eval_data or self.eval_data).items():
@@ -184,14 +191,8 @@ class TrainManager(Extensible):
                             self.fixtures["loss"] = loss
 
     def train(self):
-        with self.mode("train"), self.staged(
-            "train",
-            {
-                "train_manager": self,
-                "writer": self.writer,
-                "fixtures": self.fixtures,
-                "epoch_num": 0,
-            },
+        with self.train_manager_stage(), self.mode("train"), self.staged(
+            "train", {"epoch_num": 0}
         ):
             # Eval before all training
             if self.fixtures["epoch_num"] == 0:
