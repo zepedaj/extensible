@@ -23,19 +23,43 @@ class Unassigned:
 @dataclass
 class TrainManager(Extensible):
     model: torch.nn.Module
+    """
+    The model applied to each batch. Overload any of :meth:`model_forward`, :meth:`eval_model_forward`, :meth:`train_model_forward` if needed to call the model correctly.
+    """
     loss: Callable[[Batch, Prediction], ScalarTensor]
+    """
+    The loss computed from the batch output. Overload any of :meth:`model_forward`, :meth:`eval_model_forward`, :meth:`train_model_forward` if needed to call the loss correctly.
+    """
     epochs: int
+    """
+    The number of training epochs
+    """
     train_data: DataSource
+    """
+    The training data
+    """
     eval_data: Optional[Dict[str, DataSource]] = None
+    """
+    Various validation data sets.
+    """
     extensions: OrderedDict[str, Extension] = field(default_factory=OrderedDict_)
     """
-    User-provided extensions. If an extension with key ``'eval_state'`` is not included, it is added by default as an instance of :class:`EvalState`.
+    User-provided extensions. By default, if the keys ``'eval_state'`` and ``'ckpt_saver'`` are not included, :class:`~extensions.EvalState` and :class:`~extensions.CheckpointSaver` extensions are added at those keys.
     """
     output_dir: Path = Path(f"./{str(datetime.now())}")
+    """
+    Path that will contain the writer output and checkpoints.
+    """
     writer: ploteries.Writer = Unassigned
+    """
+    A visualization writer. Defaults to a :class:`ploteries.Writer` object with path ``f"{output_dir}/ploteries.plts"``
+    """
     device: Union[torch.device, str] = torch.device(
         "cuda:0" if torch.cuda.is_available() else "cpu:0"
     )
+    """
+    The main device used. The model will be moved to this device by :meth:`setup`.
+    """
     optimizer: Union[
         torch.optim.Optimizer,
         Callable[
@@ -45,9 +69,21 @@ class TrainManager(Extensible):
             torch.optim.Optimizer,
         ],
     ] = torch.optim.Adam
+    """
+    The optimizer.
+    """
     lr_schedule: Optional[LRSchedule] = None
+    """
+    An optional learning rate scheduler
+    """
     mode_name: str = field(init=False)
+    """
+    The current mode. Can be one of ``'train'`` or ``'eval'``.
+    """
     load_ckpt: InitVar[bool] = False
+    """
+    Whether to load a checkpoint and continue training (``load_ckpt=True``) or to train from scratch if no checkpoints are available (``load_ckpt=False``, the default)
+    """
 
     def __post_init__(self, load_ckpt):
         super().__init__(self.extensions)

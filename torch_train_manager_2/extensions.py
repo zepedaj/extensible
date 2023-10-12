@@ -120,18 +120,3 @@ class CheckpointSaver(Extension):
             },
             self.filepath(epoch_num),
         )
-
-
-class CPUProfiler(Extension):
-    """
-    Exposes a ``'profiler'`` fixture that can be used as a context manager to profile areas of code.
-    """
-
-    def __init__(self, output_file="train_manager.prof"):
-        self.output_file = output_file
-
-    def pre_train_manager(self, fixtures):
-        fixtures["cpu_profiler"] = cProfile.Profile()
-
-    def post_train_manager(self, profiler):
-        profiler.dump_stats(self.output_file)
