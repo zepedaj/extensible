@@ -77,8 +77,8 @@ class TrainManager(Extensible):
 
     def setup(self):
         """
-        This method 1) sets up a default writer if none was provided, 2) moves the model to the device and
-        3) builds the optimizer if it was provided as a callable.
+        This method 1) moves the model to the device and
+        2) builds the optimizer if it was provided as a callable.
         """
 
         self.model = self.model.to(self.device)
@@ -154,7 +154,7 @@ class TrainManager(Extensible):
     @reentrant_context_manager
     def train_manager_stage(self):
         """
-        Wraps both :meth:`train` or stand-alond :meth:`eval calls.
+        Wraps both :meth:`train` or stand-alone :meth:`eval calls.
         """
         with self.staged(
             "train_manager",
