@@ -126,8 +126,9 @@ class Extensible:
         # Yield to center stage
         try:
             yield
-
-        finally:
+        except Exception:
+            raise
+        else:
             # Call post methods
             for _meth in self.get_extension_methods("post", stage_name):
                 self.fixtures(_meth)
