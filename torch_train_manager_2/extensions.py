@@ -1,5 +1,5 @@
 from pathlib import Path
-from typing import Optional, Tuple
+from typing import Iterable, Optional, Tuple
 from .defs import *
 from .extensible import Extension
 
@@ -46,13 +46,31 @@ class CheckpointSaver(Extension):
     ckpt_ext = ".ckpt"
 
     def __init__(
-        self, path, saved_fixtures=("epoch_num",), saved_attribs=None, load_ckpt=False
+        self,
+        path,
+        saved_fixtures: Optional[Iterable[str]] = ("epoch_num",),
+        saved_attribs: Optional[Iterable[str]] = None,
+        load_ckpt: bool = False,
     ):
+        """
+        :param path: The path where all values will be saved.
+        :param saved_fixtures: The fixtures to save. By default, only ``'epoch_num'`` is saved.
+        :param saved_attribs: If not specified, all model attributes with a ``state_dict`` attribute will be saved.
+        :param load_ckpt: Whether to load the latest existing checkpoint.
+        """
         self.path = Path(path)
         self.path.mkdir(exist_ok=True)
         self.saved_fixtures = saved_fixtures
-        self.saved_attribs = saved_attribs
+        self._saved_attribs = saved_attribs
         self.load_ckpt = load_ckpt
+
+    def get_saved_attribs(self, train_manager):
+        # Deduce saved attribs if none provided
+        return self._saved_attribs or [
+            attr_name
+            for attr_name in dir(train_manager)
+            if hasattr(getattr(train_manager, attr_name), "state_dict")
+        ]
 
     def filepath(self, epoch_num):
         return self.path / f"{epoch_num}{self.ckpt_ext}"
@@ -68,26 +86,18 @@ class CheckpointSaver(Extension):
     def load_checkpoint(self, train_manager, fixtures, ckpt_num: int):
         #
         saved_values = torch.load(self.filepath(ckpt_num))
-        saved_state_dicts = saved_values["state_dicts"]
 
         # Load states
         [
-            getattr(train_manager, attrib_name).load_state_dict(
-                saved_state_dicts.pop(attrib_name)
-            )
-            for attrib_name in (self.saved_attribs or [])
+            getattr(train_manager, attrib_name).load_state_dict(attrib_value)
+            for attrib_name, attrib_value in saved_values["state_dicts"].items()
         ]
 
-        # Check all states were used
-        if saved_state_dicts:
-            raise ValueError(
-                f'Did not use state variables: {", ".join(list(saved_state_dicts))}'
-            )
-
         # Set fixtures
-        saved_fixtures = saved_values["fixtures"]
-        for fixture_name in self.saved_fixtures:
-            fixtures.modify(fixture_name, saved_fixtures.pop(fixture_name))
+        [
+            fixtures.modify(fixture_name, fixture_value)
+            for fixture_name, fixture_value in saved_values["fixtures"].items()
+        ]
 
     def pre_train(self, train_manager, fixtures):
         # Check no training has happened
@@ -95,13 +105,6 @@ class CheckpointSaver(Extension):
             raise Exception(
                 f"Checkpoints exist in the specified path `{self.path}` -- you need to specify `load_ckpt=True` if you wish to continue training"
             )
-
-        # Deduce saved attribs if none provided
-        self.saved_attibs = self.saved_attribs or [
-            attr_name
-            for attr_name in dir(train_manager)
-            if hasattr(getattr(train_manager, attr_name), "state_dict")
-        ]
 
         # Load saved attribs if requested and available
         if self.load_ckpt and (ckpt := self.get_latest_checkpoint()) is not None:
@@ -112,8 +115,8 @@ class CheckpointSaver(Extension):
         torch.save(
             {
                 "state_dicts": {
-                    attrib_name: getattr(train_manager, attrib_name).state_dict
-                    for attrib_name in (self.saved_attribs or [])
+                    attrib_name: getattr(train_manager, attrib_name).state_dict()
+                    for attrib_name in self.get_saved_attribs(train_manager)
                 },
                 "fixtures": {name: fixtures[name] for name in self.saved_fixtures},
             },

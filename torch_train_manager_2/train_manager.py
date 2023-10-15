@@ -25,6 +25,7 @@ class TrainManager(Extensible):
     model: torch.nn.Module
     """
     The model applied to each batch. Overload any of :meth:`model_forward`, :meth:`eval_model_forward`, :meth:`train_model_forward` if needed to call the model correctly.
+    If the model implements method ``initialize_params``, that method will be called by :meth:`initialize_params`.
     """
     loss: Callable[[Batch, Prediction], ScalarTensor]
     """
@@ -100,13 +101,13 @@ class TrainManager(Extensible):
             self.writer = ploteries.Writer(self.output_dir / "ploteries.pltr")
 
         # Add the default extensions
-        self.add_extension("eval_state", EvalState(), at_start=True, as_default=True)
         self.add_extension(
             "ckpt_saver",
             CheckpointSaver(path=self.output_dir / "checkpoints", load_ckpt=load_ckpt),
             at_start=False,
             as_default=True,
         )
+        self.add_extension("eval_state", EvalState(), at_start=True, as_default=True)
 
         # Setup
         self.setup()
@@ -127,19 +128,27 @@ class TrainManager(Extensible):
         .. note::
             When keeping track of the total number of samples, this method needs to be implemented.
             It should return the actual batch size, which might be different from the nominal size, particularly for the last batch in the epoch.
-            By default, it will return ``1``, meaning that it counts batches instead of batch sizes.
+            By default, it will return ``len(batch)``, if batch supports it, otherwise ``1``.
 
         """
-        return 1
+        try:
+            return len(batch)
+        except TypeError:
+            return 1
 
     def initialize_params(self):
         """
-        .. note:: Consider overloading this method.
+        By default, this method attempts to call method ``self.model.initialize_params()``.
+        If :attr:`self.model` does not implement that method, it carries out xavier uniform initialization on all parameters with more than one dimension.
+
+        .. note:: Consider adding an ``initialize()`` method to your model or overloading this method in your train manager.
         """
-        # Initialize all parameters in the model
-        for name, p in self.model.named_parameters():
-            if p.dim() > 1:
-                nn.init.xavier_uniform_(p)
+        if hasattr(self.model, "initialize_params"):
+            self.model.initialize_params()
+        else:
+            for name, p in self.model.named_parameters():
+                if p.dim() > 1:
+                    nn.init.xavier_uniform_(p)
 
     #### MODEL FORWARD
 
