@@ -1,13 +1,8 @@
 from collections import OrderedDict as OrderedDict_, UserDict
-from contextlib import contextmanager
-from inspect import getfullargspec, signature
-from typing import Any, Dict, Iterable, List, Optional, OrderedDict as OrderedDict, Set
-from dataclasses import dataclass, field
-import warnings
-
-
-class Extension:
-    pass
+from contextlib import contextmanager, nullcontext
+from inspect import signature
+from typing import Any, Dict, List, Optional, OrderedDict as OrderedDict, Set
+from .extensions import Extension
 
 
 class FixturesDict(UserDict):

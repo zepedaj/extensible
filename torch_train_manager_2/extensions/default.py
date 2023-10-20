@@ -1,7 +1,10 @@
 from pathlib import Path
 from typing import Iterable, Optional, Tuple
-from .defs import *
-from .extensible import Extension
+from ..defs import *
+
+
+class Extension:
+    pass
 
 
 class EvalState(Extension):
