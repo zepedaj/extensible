@@ -87,7 +87,10 @@ class TrainManager(Extensible):
     """
 
     def __post_init__(self, load_ckpt):
+        #
         super().__init__(self.extensions)
+        self.staged("train_manager").__enter__()  # This stage is never exited.
+        self.fixtures.update({"train_manager": self, "fixtures": self.fixtures})
 
         # Copy the eval data dictionary
         self.eval_data = OrderedDict_(self.eval_data or {})
@@ -99,6 +102,7 @@ class TrainManager(Extensible):
         # Set the writer
         if self.writer is Unassigned:
             self.writer = ploteries.Writer(self.output_dir / "ploteries.pltr")
+        self.fixtures["writer"] = self.writer
 
         # Add the default extensions
         self.add_extension(
@@ -119,7 +123,7 @@ class TrainManager(Extensible):
         """
 
         self.model = self.model.to(self.device)
-        self.initialize_params()
+        self.fixtures(self.initialize_params)
         if not isinstance(self.optimizer, torch.optim.Optimizer):
             self.optimizer = self.optimizer(self.model.parameters())
 
@@ -141,7 +145,7 @@ class TrainManager(Extensible):
         By default, this method attempts to call method ``self.model.initialize_params()``.
         If :attr:`self.model` does not implement that method, it carries out xavier uniform initialization on all parameters with more than one dimension.
 
-        .. note:: Consider adding an ``initialize()`` method to your model or overloading this method in your train manager.
+        .. note:: Consider adding an ``initialize_params()`` method to your model or overloading this method in your train manager. Note that overloads of this method can take fixture arguments.
         """
         if hasattr(self.model, "initialize_params"):
             self.model.initialize_params()
@@ -177,11 +181,11 @@ class TrainManager(Extensible):
         """
         return self.loss(batch, prediction)
 
-    def train_loss_forward(self, *args, **kwargs):
-        return self.loss_forward(*args, **kwargs)
+    def train_loss_forward(self, batch, prediction):
+        return self.loss_forward(batch, prediction)
 
-    def eval_loss_forward(self, *args, **kwargs):
-        return self.loss_forward(*args, **kwargs)
+    def eval_loss_forward(self, batch, prediction):
+        return self.loss_forward(batch, prediction)
 
     #### TRAIN AND EVAL
 
@@ -196,23 +200,12 @@ class TrainManager(Extensible):
         finally:
             self.model.train(current_training_mode)
 
-    @reentrant_context_manager
-    def train_manager_stage(self):
-        """
-        Wraps both :meth:`train` or stand-alone :meth:`eval calls.
-        """
-        with self.staged(
-            "train_manager",
-            {"train_manager": self, "writer": self.writer, "fixtures": self.fixtures},
-        ):
-            yield
-
     def eval(self, eval_data: Optional[Dict[str, DataSource]] = None):
         if (eval_data or self.eval_data) is None:
             return
 
         #
-        with self.train_manager_stage(), self.mode("eval"), self.staged(
+        with self.mode("eval"), self.staged(
             "eval",
             defaults={"epoch_num": 0},  # In case this is a stand-alone eval.
         ):
@@ -236,9 +229,7 @@ class TrainManager(Extensible):
                             self.fixtures["loss"] = loss
 
     def train(self):
-        with self.train_manager_stage(), self.mode("train"), self.staged(
-            "train", {"epoch_num": 0}
-        ):
+        with self.mode("train"), self.staged("train", {"epoch_num": 0}):
             # Eval before all training
             if self.fixtures["epoch_num"] == 0:
                 # Extension CheckpointSaver could have set `epoch_num`
