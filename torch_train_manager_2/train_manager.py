@@ -89,7 +89,8 @@ class TrainManager(Extensible):
     def __post_init__(self, load_ckpt):
         #
         super().__init__(self.extensions)
-        self.staged("train_manager").__enter__()  # This stage is never exited.
+        self._train_manager_stage = self.staged("train_manager")
+        self._train_manager_stage.__enter__()  # This stage is never exited.
         self.fixtures.update({"train_manager": self, "fixtures": self.fixtures})
 
         # Copy the eval data dictionary
@@ -115,6 +116,15 @@ class TrainManager(Extensible):
 
         # Setup
         self.setup()
+
+    @reentrant_context_manager
+    def run_stage(self):
+        """
+        The run stage is entered either at the start of :meth:`train` or, for stand-alone evaluations, at the start of :meth:`eval`
+        and supports adding hooks to the top-level method being executed
+        """
+        with self.staged("run"):
+            yield
 
     def setup(self):
         """
@@ -148,7 +158,7 @@ class TrainManager(Extensible):
         .. note:: Consider adding an ``initialize_params()`` method to your model or overloading this method in your train manager. Note that overloads of this method can take fixture arguments.
         """
         if hasattr(self.model, "initialize_params"):
-            self.model.initialize_params()
+            self.fixtures(self.model.initialize_params)
         else:
             for name, p in self.model.named_parameters():
                 if p.dim() > 1:
@@ -197,6 +207,8 @@ class TrainManager(Extensible):
             with {"train": nullcontext, "eval": torch.no_grad}[mode_name]():
                 self.current_mode = mode_name
                 yield
+        except KeyError:
+            raise ValueError(f"Invalid mode name `{mode_name}`")
         finally:
             self.model.train(current_training_mode)
 
@@ -205,7 +217,7 @@ class TrainManager(Extensible):
             return
 
         #
-        with self.mode("eval"), self.staged(
+        with self.run_stage(), self.mode("eval"), self.staged(
             "eval",
             defaults={"epoch_num": 0},  # In case this is a stand-alone eval.
         ):
@@ -229,7 +241,9 @@ class TrainManager(Extensible):
                             self.fixtures["loss"] = loss
 
     def train(self):
-        with self.mode("train"), self.staged("train", {"epoch_num": 0}):
+        with self.run_stage(), self.mode("train"), self.staged(
+            "train", {"epoch_num": 0}
+        ):
             # Eval before all training
             if self.fixtures["epoch_num"] == 0:
                 # Extension CheckpointSaver could have set `epoch_num`

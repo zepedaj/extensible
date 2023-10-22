@@ -1,8 +1,79 @@
 from collections import OrderedDict as OrderedDict_, UserDict
-from contextlib import contextmanager, nullcontext
+from contextlib import AbstractContextManager, ExitStack, contextmanager, nullcontext
 from inspect import signature
-from typing import Any, Dict, List, Optional, OrderedDict as OrderedDict, Set
+from typing import Any, Callable, Dict, List, Optional, OrderedDict as OrderedDict, Set
+from uuid import uuid1
 from .extensions import Extension
+
+
+def randname():
+    return str(uuid1())
+
+
+class FixtureError(KeyError):
+    pass
+
+
+class PreHookContextManager:
+    """
+    All pre- hooks are executed as the :meth:`__enter__` method of this context manager within an :class:`ExitStack`.
+    """
+
+    def __init__(self, extensible: "Extensible", method: Callable):
+        self.extensible = extensible
+        self.method = method
+
+    def __enter__(self):
+        self.extensible.fixtures(self.method)
+
+    def __exit__(self, *_):
+        pass
+
+
+def always(method):
+    """
+    By default, post methods do not run if an error occurred in the center stage unless they are
+    decorated with this decorator. When decorated, they run whether an error occurred or not.
+
+    Post methods decorated with :func:`always` should have default values for all their fixture parameters,
+    as exceptions might result in missing fixtures.
+    """
+    # TODO: Make it possible to ignore missing fixtures when the hook method provides default parameter values.
+    method.__extensible_run_always__ = True
+    return method
+
+
+class PostHookContextManager(AbstractContextManager):
+    """
+    All post- hooks are executed as the :meth:`__exit__` method of this context manager within an :class:`ExitStack`.
+    The post- hook calls are wrapped in a stage that injects ``'exc_type'``, ``'exc_value'``, and ``'traceback'`` hooks
+    that follow the same protocol as standard python ``__exit__`` methods. In particular, they will all be ``None`` if no
+    exception occurred during the center stage and non-``None`` otherwise.
+    """
+
+    def __init__(self, extensible: "Extensible", method: Callable):
+        self.extensible = extensible
+        self.method = method
+
+    def __exit__(self, exc_type, exc_value, traceback):
+        if traceback is None or getattr(
+            self.method, "__extensible_run_always__", False
+        ):  # Run on clean center stage or when marked as on error
+            #
+            with self.extensible.staged(
+                "__exit__" + randname()
+            ):  # Not sure if random needed here, but does not hurt
+                self.extensible.fixtures.update(
+                    {
+                        "exc_type": exc_type,
+                        "exc_value": exc_value,
+                        "traceback": traceback,
+                    }
+                )
+                # Temporarily remove the exception stage to have the correct context
+                # when calling the fixture
+                with self.extensible.fixtures.temp_pop_stage():
+                    return self.extensible.fixtures(self.method)
 
 
 class FixturesDict(UserDict):
@@ -26,6 +97,24 @@ class FixturesDict(UserDict):
             )
         super().__setitem__(key, value)
 
+    def __getitem__(self, key):
+        try:
+            return super().__getitem__(key)
+        except KeyError as err:
+            raise FixtureError(*err.args)
+
+    @contextmanager
+    def temp_pop_stage(self):
+        """
+        Pops the current stage during the context to use the parent stage for fixture registration,
+        and adds it back at the end of the context.
+        """
+        stage_fixtures = self.stage_fixtures.pop()
+        try:
+            yield
+        finally:
+            self.stage_fixtures.append(stage_fixtures)
+
     def modify(self, key, value):
         if key not in self.data:
             raise Exception(f"Cannot modify non-existing fixture `{key}`.")
@@ -42,7 +131,7 @@ class FixturesDict(UserDict):
         arg_names = signature(method).parameters
         try:
             params = {key: kwargs.get(key, self[key]) for key in arg_names}
-        except KeyError as err:
+        except FixtureError as err:
             raise TypeError(
                 f'Failed to supply fixture `{", ".join(err.args)}` when attempting to call `{method}`'
             )
@@ -52,6 +141,7 @@ class FixturesDict(UserDict):
 
 class Extensible:
     extensions: OrderedDict
+    """ Contains all objects that expose hooks """
     fixtures: FixturesDict
     """ Contains all fixtures that will be injected as parameters to extension methods """
 
@@ -106,7 +196,7 @@ class Extensible:
         :param pre_defaults: Similar to ``fixtures`` but assigned only if the corresponding fixture does not yet exist. Those that get assigned will be cleared at the end of the stage.
         """
 
-        # Start recording added fixtures
+        # Start recording added fixtures and add pre fixtures and defaults
         self.fixtures.start_stage()
         self.fixtures.update(fixtures or {})
         [
@@ -114,21 +204,28 @@ class Extensible:
             for key, value in (defaults or {}).items()
         ]
 
-        # Call pre methods
-        for _meth in self.get_extension_methods("pre", stage_name):
-            self.fixtures(_meth)
-
-        # Yield to center stage
+        #
         try:
-            yield
-        except Exception:
-            raise
-        else:
-            # Call post methods
-            for _meth in self.get_extension_methods("post", stage_name):
-                self.fixtures(_meth)
-
-            # Remove all stage fixtures
+            with ExitStack() as stack:
+                # Add post first to ensure they all execute on failures
+                # since PostHookContextManager have no __enter__.
+                [
+                    stack.enter_context(PostHookContextManager(self, _meth))
+                    # First added must be *inner-most* in nesting level
+                    # so as to execute first
+                    for _meth in list(self.get_extension_methods("post", stage_name))[
+                        ::-1
+                    ]
+                ]
+                # Execute all pre contexts
+                [
+                    stack.enter_context(PreHookContextManager(self, _meth))
+                    # First added must be *outer-most* in nesting level
+                    # so as to execute first
+                    for _meth in self.get_extension_methods("pre", stage_name)
+                ]
+                yield
+        finally:
             self.fixtures.end_stage()
 
     def __getitem__(self, name):
