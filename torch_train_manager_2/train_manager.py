@@ -201,14 +201,16 @@ class TrainManager(Extensible):
 
     @contextmanager
     def mode(self, mode_name):
+        if mode_name not in ["train", "eval"]:
+            raise ValueError(f"Invalid mode name `{mode_name}`")
+
         current_training_mode = self.model.training
-        self.model.train({"train": True, "eval": False}[mode_name])
         try:
+            self.model.train({"train": True, "eval": False}[mode_name])
             with {"train": nullcontext, "eval": torch.no_grad}[mode_name]():
                 self.current_mode = mode_name
                 yield
-        except KeyError:
-            raise ValueError(f"Invalid mode name `{mode_name}`")
+
         finally:
             self.model.train(current_training_mode)
 
