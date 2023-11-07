@@ -84,7 +84,7 @@ class FixturesDict(UserDict):
         super().__init__(self, *args, **kwargs)
         self.stage_fixtures = []
 
-    def __setitem__(self, key, value, force=False):
+    def __setitem__(self, key: str, value, force=False):
         if not self.stage_fixtures:
             raise Exception("No stage has been started.")
         if key not in self.data:
@@ -97,7 +97,7 @@ class FixturesDict(UserDict):
             )
         super().__setitem__(key, value)
 
-    def __getitem__(self, key):
+    def __getitem__(self, key: str):
         try:
             return super().__getitem__(key)
         except KeyError as err:

@@ -1,6 +1,7 @@
 from pathlib import Path
 from typing import Iterable, Optional, Tuple
 from ..defs import *
+import torch
 
 
 class Extension:
@@ -53,13 +54,14 @@ class CheckpointSaver(Extension):
         path,
         saved_fixtures: Optional[Iterable[str]] = ("epoch_num",),
         saved_attribs: Optional[Iterable[str]] = None,
-        load_ckpt: bool = False,
+        load_ckpt: Union[int, bool] = False,
     ):
         """
         :param path: The path where all values will be saved.
         :param saved_fixtures: The fixtures to save. By default, only ``'epoch_num'`` is saved.
         :param saved_attribs: If not specified, all model attributes with a ``state_dict`` attribute will be saved.
-        :param load_ckpt: Whether to load the latest existing checkpoint.
+        :param load_ckpt: When carrying out standalone evaluations, an epoch number (or ``True`` for the latest checkpoint) specifying
+        a checkpoint to load. When training, set to ``True`` to continue training if any checkpoints exist (training will fail with the default value ``False`` if checkpoints exist).
         """
         self.path = Path(path)
         self.path.mkdir(exist_ok=True)
@@ -92,8 +94,11 @@ class CheckpointSaver(Extension):
 
         # Load states
         [
-            getattr(train_manager, attrib_name).load_state_dict(attrib_value)
+            attrib.load_state_dict(attrib_value)
             for attrib_name, attrib_value in saved_values["state_dicts"].items()
+            # Some stateful vars ('optimizer', 'lr_schedule') might be set to `None`
+            # during stanadlone evaluations -- skip loading vars that don't have a state dict.
+            if hasattr(attrib := getattr(train_manager, attrib_name), "load_state_dict")
         ]
 
         # Set fixtures
@@ -102,8 +107,17 @@ class CheckpointSaver(Extension):
             for fixture_name, fixture_value in saved_values["fixtures"].items()
         ]
 
-    def pre_train(self, train_manager, fixtures):
-        # Check no training has happened
+    def pre_train(self, train_manager, fixtures, standalone_eval):
+        """
+        Loads the state at a particular checkpoint in preparation for standalone evaluations.
+        """
+        # Param load_ckpt must be a boolean when training
+        if not isinstance(self.load_ckpt, bool):
+            raise Exception(
+                "Parameter ``load_ckpt`` must be a boolean when training  -- can only load the latest checkpoint when training."
+            )
+
+        # If no request to load checkpoint, check no training has previously happened
         if not self.load_ckpt and self.get_latest_checkpoint() is not None:
             raise Exception(
                 f"Checkpoints exist in the specified path `{self.path}` -- you need to specify `load_ckpt=True` if you wish to continue training"
@@ -111,7 +125,34 @@ class CheckpointSaver(Extension):
 
         # Load saved attribs if requested and available
         if self.load_ckpt and (ckpt := self.get_latest_checkpoint()) is not None:
-            self.load_checkpoint(train_manager, fixtures, ckpt[0])
+            self.load_checkpoint(train_manager, fixtures, ckpt[0], standalone_eval)
+
+    def pre_eval(self, train_manager, fixtures, standalone_eval):
+        """
+        Loads the state at a particular checkpoint in preparation for standalone evaluations.
+
+        Fails if no checkpoints are available.
+        """
+        # Currently training, no need to load ckpt here
+        if not standalone_eval:
+            return
+
+        # Standalone evaluation - we need to load a ckpt
+        if self.load_ckpt is False:
+            raise Exception(
+                f"Parameter `load_ckpt` must be an epoch number (or `True` for the latest checkpoint) when executing standalone evaluations"
+            )
+        elif self.load_ckpt is True:
+            if (ckpt := self.get_latest_checkpoint()) is None:
+                raise ValueError(
+                    "Did not find any checkpoints -- cannot carry out a standalone evaluation"
+                )
+            ckpt_num = ckpt[0]
+        else:
+            ckpt_num = self.load_ckpt
+
+        # Load the specified checkpoint
+        self.load_checkpoint(train_manager, fixtures, ckpt_num)
 
     def post_train_step_epoch(self, train_manager, fixtures, epoch_num):
         # Save a checkpoint file

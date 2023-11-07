@@ -49,7 +49,7 @@ class TrainManager(Extensible):
     """
     output_dir: Path = Path(f"./{str(datetime.now())}")
     """
-    Path that will contain the writer output and checkpoints.
+    Path that will contain the writer output and default checkpoints directory.
     """
     writer: ploteries.Writer = Unassigned
     """
@@ -114,28 +114,27 @@ class TrainManager(Extensible):
         )
         self.add_extension("eval_state", EvalState(), at_start=True, as_default=True)
 
-        # Setup
-        self.setup()
-
     @reentrant_context_manager
     def run_stage(self):
         """
-        The run stage is entered either at the start of :meth:`train` or, for stand-alone evaluations, at the start of :meth:`eval`
+        The run stage is entered either at the start of :meth:`train` or, for standalone evaluations, at the start of :meth:`eval`
         and supports adding hooks to the top-level method being executed
         """
         with self.staged("run"):
             yield
 
-    def setup(self):
+    def train_setup(self):
         """
         This method 1) moves the model to the device and
         2) builds the optimizer if it was provided as a callable.
         """
-
         self.model = self.model.to(self.device)
         self.fixtures(self.initialize_params)
         if not isinstance(self.optimizer, torch.optim.Optimizer):
             self.optimizer = self.optimizer(self.model.parameters())
+
+    def standalone_eval_setup(self):
+        self.model = self.model.to(self.device)
 
     def get_true_batch_size(self, batch: Batch) -> int:
         """
@@ -215,14 +214,21 @@ class TrainManager(Extensible):
             self.model.train(current_training_mode)
 
     def eval(self, eval_data: Optional[Dict[str, DataSource]] = None):
+        """
+        Runs evaluation over all the evaluation datasets.
+        """
+
         if (eval_data or self.eval_data) is None:
             return
 
         #
         with self.run_stage(), self.mode("eval"), self.staged(
             "eval",
-            defaults={"epoch_num": 0},  # In case this is a stand-alone eval.
+            # In case this is a standalone eval.
+            defaults={"epoch_num": 0, "standalone_eval": True},
         ):
+            if self.fixtures["standalone_eval"]:
+                self.standalone_eval_setup()
             #
             for datasource_name, datasource in (eval_data or self.eval_data).items():
                 with self.staged(
@@ -243,13 +249,17 @@ class TrainManager(Extensible):
                             self.fixtures["loss"] = loss
 
     def train(self):
+        """
+        Trains the model over multiple epochs, evaluating against all evaluation datasets before the first epoch and after every epoch.
+        """
         with self.run_stage(), self.mode("train"), self.staged(
-            "train", {"epoch_num": 0}
+            "train", {"epoch_num": 0, "standalone_eval": False}
         ):
             # Eval before all training
             if self.fixtures["epoch_num"] == 0:
                 # Extension CheckpointSaver could have set `epoch_num`
                 # to a value other than zero
+                self.train_setup()
                 self.eval()
 
             # Train
