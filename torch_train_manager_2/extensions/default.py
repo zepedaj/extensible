@@ -125,7 +125,7 @@ class CheckpointSaver(Extension):
 
         # Load saved attribs if requested and available
         if self.load_ckpt and (ckpt := self.get_latest_checkpoint()) is not None:
-            self.load_checkpoint(train_manager, fixtures, ckpt[0], standalone_eval)
+            self.load_checkpoint(train_manager, fixtures, ckpt[0])
 
     def pre_eval(self, train_manager, fixtures, standalone_eval):
         """
