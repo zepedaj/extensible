@@ -167,7 +167,7 @@ class TrainManager(Extensible):
 
     def model_forward(self, batch):
         """
-        .. todo:: This method likely needs to be overloaded to extract the correct model input from the batch.
+        .. note:: This method likely needs to be overloaded to extract the correct model input from the batch.
 
         .. note:: Unless an explicit implementation is provided in a derived class, this method takes the place of both :meth:`train_model_forward` and :meth:`eval_model_forward`.
 
