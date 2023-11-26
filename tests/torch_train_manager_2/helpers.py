@@ -22,7 +22,7 @@ def get_train_manager(**kwargs):
                     train_data=datasource,
                     eval_data=[("Eval", datasource)],
                     device=torch.device("cpu:0"),
-                    output_dir=temp_dir,
+                    train_dir=temp_dir,
                 ),
                 **kwargs,
             }

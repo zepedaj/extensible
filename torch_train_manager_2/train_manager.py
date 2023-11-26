@@ -47,13 +47,13 @@ class TrainManager(Extensible):
     """
     User-provided extensions. By default, if the keys ``'eval_state'`` and ``'ckpt_saver'`` are not included, :class:`~extensions.EvalState` and :class:`~extensions.CheckpointSaver` extensions are added at those keys.
     """
-    output_dir: Path = Path(f"./{str(datetime.now())}")
+    train_dir: Path = Path(f"./{str(datetime.now())}")
     """
-    Path that will contain the writer output and default checkpoints directory.
+    Path that will contain the writer output and default checkpoints directory when training; checkpoints will be loaded from here when evaluating
     """
     writer: ploteries.Writer = Unassigned
     """
-    A visualization writer. Defaults to a :class:`ploteries.Writer` object with path ``f"{output_dir}/ploteries.plts"``
+    A visualization writer. Defaults to a :class:`ploteries.Writer` object with path ``f"{train_dir}/ploteries.plts"``
     """
     device: Union[torch.device, str] = torch.device(
         "cuda:0" if torch.cuda.is_available() else "cpu:0"
@@ -97,18 +97,18 @@ class TrainManager(Extensible):
         self.eval_data = OrderedDict_(self.eval_data or {})
 
         # Make the output dir
-        self.output_dir = Path(self.output_dir)
-        self.output_dir.mkdir(exist_ok=True)
+        self.train_dir = Path(self.train_dir)
+        self.train_dir.mkdir(exist_ok=True)
 
         # Set the writer
         if self.writer is Unassigned:
-            self.writer = ploteries.Writer(self.output_dir / "ploteries.pltr")
+            self.writer = ploteries.Writer(self.train_dir / "ploteries.pltr")
         self.fixtures["writer"] = self.writer
 
         # Add the default extensions
         self.add_extension(
             "ckpt_saver",
-            CheckpointSaver(path=self.output_dir / "checkpoints", load_ckpt=load_ckpt),
+            CheckpointSaver(path=self.train_dir / "checkpoints", load_ckpt=load_ckpt),
             at_start=False,
             as_default=True,
         )
