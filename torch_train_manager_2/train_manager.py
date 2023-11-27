@@ -85,8 +85,12 @@ class TrainManager(Extensible):
     """
     Whether to load a checkpoint and continue training (``load_ckpt=True``) or to train from scratch if no checkpoints are available (``load_ckpt=False``, the default)
     """
+    ckpt_meta: InitVar[Any] = None
+    """
+    Extra data that will be stored with every saved checkpoint
+    """
 
-    def __post_init__(self, load_ckpt):
+    def __post_init__(self, load_ckpt, ckpt_meta):
         #
         super().__init__(self.extensions)
         self._train_manager_stage = self.staged("train_manager")
@@ -108,7 +112,11 @@ class TrainManager(Extensible):
         # Add the default extensions
         self.add_extension(
             "ckpt_saver",
-            CheckpointSaver(path=self.train_dir / "checkpoints", load_ckpt=load_ckpt),
+            CheckpointSaver(
+                path=self.train_dir / "checkpoints",
+                load_ckpt=load_ckpt,
+                ckpt_meta=ckpt_meta,
+            ),
             at_start=False,
             as_default=True,
         )

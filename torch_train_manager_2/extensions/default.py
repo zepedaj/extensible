@@ -55,6 +55,7 @@ class CheckpointSaver(Extension):
         saved_fixtures: Optional[Iterable[str]] = ("epoch_num",),
         saved_attribs: Optional[Iterable[str]] = None,
         load_ckpt: Union[int, bool] = False,
+        ckpt_meta: Any = None,
     ):
         """
         :param path: The path where all values will be saved.
@@ -68,6 +69,7 @@ class CheckpointSaver(Extension):
         self.saved_fixtures = saved_fixtures
         self._saved_attribs = saved_attribs
         self.load_ckpt = load_ckpt
+        self.ckpt_meta = ckpt_meta
 
     def get_saved_attribs(self, train_manager):
         # Deduce saved attribs if none provided
@@ -106,6 +108,9 @@ class CheckpointSaver(Extension):
             fixtures.modify(fixture_name, fixture_value)
             for fixture_name, fixture_value in saved_values["fixtures"].items()
         ]
+
+        # Set meta
+        self.meta = saved_values.get("meta", None)
 
     def pre_train(self, train_manager, fixtures, standalone_eval):
         """
@@ -163,6 +168,7 @@ class CheckpointSaver(Extension):
                     for attrib_name in self.get_saved_attribs(train_manager)
                 },
                 "fixtures": {name: fixtures[name] for name in self.saved_fixtures},
+                "meta": self.ckpt_meta,
             },
             self.filepath(epoch_num),
         )
