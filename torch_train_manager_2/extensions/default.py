@@ -91,6 +91,16 @@ class CheckpointSaver(Extension):
         return None
 
     def load_checkpoint(self, train_manager, fixtures, ckpt_num: int):
+        """
+        Loads weights and fixtures. If :attr:`ckpt_meta` is ``None``, also sets it to the loaded value.
+
+        .. note:: If the object was initialzed with a non-``None`` value for ``ckpt_meta``, this call does not overwrite that ``ckpt_meta`` with the value stored
+        in the checkoint. This is because, presumably, ``ckpt_meta`` is used to build the train manager, potentially with some modifications to support,
+        e.g., evaluations under different conditions, or continued training with a different leraning rate or dataset. Hence, the caller needs to account
+        for any discrepancies in the value of ``ckpt_meta`` stored in the checkpoint and those passed in to the initializer that could, e.g., affect the architecture
+        of the model.
+        """
+
         #
         saved_values = torch.load(self.filepath(ckpt_num))
 
@@ -110,9 +120,10 @@ class CheckpointSaver(Extension):
         ]
 
         # Set meta
-        self.meta = saved_values.get("meta", None)
+        if self.ckpt_meta is None:
+            self.ckpt_meta = saved_values.get("meta", None)
 
-    def pre_train(self, train_manager, fixtures, standalone_eval):
+    def pre_train(self, train_manager, fixtures):
         """
         Loads the state at a particular checkpoint in preparation for standalone evaluations.
         """
