@@ -22,7 +22,7 @@ copyright = "2023, Joaquin Zepeda"
 author = "Joaquin Zepeda"
 
 # The full version, including alpha/beta/rc tags
-release = "beta"
+release = "0.0.0"
 
 
 # -- General configuration ---------------------------------------------------
@@ -35,6 +35,7 @@ extensions = [
     "sphinx.ext.todo",
     "sphinx.ext.doctest",
     "sphinx.ext.autodoc",
+    "sphinx.ext.autosummary",
     "sphinx.ext.mathjax",
 ]
 
@@ -52,9 +53,27 @@ exclude_patterns = []
 # The theme to use for HTML and HTML Help pages.  See the documentation for
 # a list of builtin themes.
 #
-html_theme = "sphinx_rtd_theme"
+html_theme = "sphinx_book_theme"
+html_logo = "images/train_man1.jpg"
+html_theme_options = {
+    #    "logo_only": True,
+    # "display_version": True,
+}
 
 # Add any paths that contain custom static files (such as style sheets) here,
 # relative to this directory. They are copied after the builtin static files,
 # so a file named "default.css" will overwrite the builtin "default.css".
 html_static_path = ["_static"]
+
+# -- Extension configuration -------------------------------------------------
+#
+autoclass_content = "both"
+autodoc_default_options = {
+    "member-order": "bysource",
+    "members": True,
+    "special-members": "__call__,__getitem__,__len__",
+    "ignore-module-all": True,
+    "show-inheritance": True,
+}
+autosummary_generate = True
+todo_include_todos = True

@@ -10,6 +10,7 @@ Welcome to Train Manager's documentation!
    :maxdepth: 2
    :caption: Contents:
 
+   content/intro
    content/getting_started
    content/modules
    content/todo
