@@ -55,7 +55,6 @@ class CheckpointSaver(Extension):
         saved_fixtures: Optional[Iterable[str]] = ("epoch_num",),
         saved_attribs: Optional[Iterable[str]] = None,
         load_ckpt: Union[int, bool] = False,
-        ckpt_meta: Any = None,
     ):
         """
         :param path: The path where all values will be saved.
@@ -69,7 +68,6 @@ class CheckpointSaver(Extension):
         self.saved_fixtures = saved_fixtures
         self._saved_attribs = saved_attribs
         self.load_ckpt = load_ckpt
-        self.ckpt_meta = ckpt_meta
 
     def get_saved_attribs(self, train_manager):
         # Deduce saved attribs if none provided
@@ -92,15 +90,8 @@ class CheckpointSaver(Extension):
 
     def load_checkpoint(self, train_manager, fixtures, ckpt_num: int):
         """
-        Loads weights and fixtures. If :attr:`ckpt_meta` is ``None``, also sets it to the loaded value.
-
-        .. note:: If the object was initialzed with a non-``None`` value for ``ckpt_meta``, this call does not overwrite that ``ckpt_meta`` with the value stored
-        in the checkoint. This is because, presumably, ``ckpt_meta`` is used to build the train manager, potentially with some modifications to support,
-        e.g., evaluations under different conditions, or continued training with a different leraning rate or dataset. Hence, the caller needs to account
-        for any discrepancies in the value of ``ckpt_meta`` stored in the checkpoint and those passed in to the initializer that could, e.g., affect the architecture
-        of the model.
+        Loads weights and fixtures
         """
-
         #
         saved_values = torch.load(self.filepath(ckpt_num))
 
@@ -119,11 +110,7 @@ class CheckpointSaver(Extension):
             for fixture_name, fixture_value in saved_values["fixtures"].items()
         ]
 
-        # Set meta
-        if self.ckpt_meta is None:
-            self.ckpt_meta = saved_values.get("meta", None)
-
-    def pre_train(self, train_manager, fixtures):
+    def pre_train(self, train_manager, fixtures, standalone_eval):
         """
         Loads the state at a particular checkpoint in preparation for standalone evaluations.
         """
@@ -179,7 +166,6 @@ class CheckpointSaver(Extension):
                     for attrib_name in self.get_saved_attribs(train_manager)
                 },
                 "fixtures": {name: fixtures[name] for name in self.saved_fixtures},
-                "meta": self.ckpt_meta,
             },
             self.filepath(epoch_num),
         )
