@@ -9,15 +9,12 @@ from pglib.contextlib import reentrant_context_manager
 import ploteries
 import torch.optim
 from torch import nn
+from torch_train_manager_2.extensions.checkpoints import CheckpointLoader
 from tqdm import tqdm
 
 from torch_train_manager_2.extensions import CheckpointSaver, EvalState
 from .defs import *
 from .extensible import Extensible, Extension
-
-
-class Unassigned:
-    pass
 
 
 @dataclass
@@ -81,12 +78,8 @@ class TrainManager(Extensible):
     """
     The current mode. Can be one of ``'train'`` or ``'eval'``.
     """
-    load_ckpt: InitVar[bool] = False
-    """
-    Whether to load a checkpoint and continue training (``load_ckpt=True``) or to train from scratch if no checkpoints are available (``load_ckpt=False``, the default)
-    """
 
-    def __post_init__(self, load_ckpt):
+    def __post_init__(self):
         #
         super().__init__(self.extensions)
         self._train_manager_stage = self.staged("train_manager")
@@ -105,22 +98,28 @@ class TrainManager(Extensible):
             self.writer = ploteries.Writer(self.train_dir / "ploteries.pltr")
         self.fixtures["writer"] = self.writer
 
-        # Add the default extensions
+        # Add checkpoint extensions. By dfeault, will load the latest checkpoint if available
         self.add_extension(
-            "ckpt_saver",
-            CheckpointSaver(path=self.train_dir / "checkpoints", load_ckpt=load_ckpt),
+            "checkpoint_saver",
+            CheckpointSaver(path=self.train_dir / "checkpoints"),
+            at_start=False,
+            as_default=True,
+        )
+        self.add_extension(
+            "checkpoint_loader",
+            CheckpointLoader(path=self.train_dir / "checkpoints", ckpt_num=-1),
             at_start=False,
             as_default=True,
         )
         self.add_extension("eval_state", EvalState(), at_start=True, as_default=True)
 
     @reentrant_context_manager
-    def run_stage(self):
+    def run_stage(self, *args, **kwargs):
         """
         The run stage is entered either at the start of :meth:`train` or, for standalone evaluations, at the start of :meth:`eval`
-        and supports adding hooks to the top-level method being executed
+        and supports adding hooks to the top-level method being executed.
         """
-        with self.staged("run"):
+        with self.staged("run", *args, **kwargs):
             yield
 
     def train_setup(self):
@@ -222,11 +221,9 @@ class TrainManager(Extensible):
             return
 
         #
-        with self.run_stage(), self.mode("eval"), self.staged(
-            "eval",
-            # In case this is a standalone eval.
-            defaults={"epoch_num": 0, "standalone_eval": True},
-        ):
+        with self.run_stage({"epoch_num": 0, "standalone_eval": True}), self.staged(
+            "eval"
+        ), self.mode("eval"):
             if self.fixtures["standalone_eval"]:
                 self.standalone_eval_setup()
             #
@@ -252,9 +249,9 @@ class TrainManager(Extensible):
         """
         Trains the model over multiple epochs, evaluating against all evaluation datasets before the first epoch and after every epoch.
         """
-        with self.run_stage(), self.mode("train"), self.staged(
-            "train", {"epoch_num": 0, "standalone_eval": False}
-        ):
+        with self.run_stage({"epoch_num": 0, "standalone_eval": False}), self.staged(
+            "train"
+        ), self.mode("train"):
             # Eval before all training
             if self.fixtures["epoch_num"] == 0:
                 # Extension CheckpointSaver could have set `epoch_num`

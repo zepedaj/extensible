@@ -150,10 +150,14 @@ class Extensible:
         self.fixtures = FixturesDict()
 
     def add_extension(
-        self, name: str, ext: Extension, at_start=False, as_default=False, warn=True
+        self, name: str, ext: Extension, at_start=False, as_default=False
     ):
         """
         Add the specified extension, moving it to the beginning or end of the ordered dictionary containing all the extensions.
+        :param name: The key to use in the extensions dictionary.
+        :param ext: The extension object.
+        :param at_start: Whether to move to the start of the ordered dict of extensions.
+        :param as_default: Whether to include only if an extension with the same name is not currently in the extensions.
         """
         if as_default and name in self.extensions:
             return

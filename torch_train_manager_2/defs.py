@@ -11,3 +11,7 @@ ParamsOrGroups = Union[
 ]
 ScalarTensor = torch.Tensor
 """ A torch tensor that is a scalar """
+
+
+class Unassigned:
+    pass
