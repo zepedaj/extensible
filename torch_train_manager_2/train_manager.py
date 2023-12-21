@@ -12,7 +12,7 @@ from torch import nn
 from torch_train_manager_2.extensions.checkpoints import CheckpointLoader
 from tqdm import tqdm
 
-from torch_train_manager_2.extensions import CheckpointSaver, EvalState
+from torch_train_manager_2.extensions import CheckpointSaver, EvalState, Setup
 from .defs import *
 from .extensible import Extensible, Extension
 
@@ -100,18 +100,13 @@ class TrainManager(Extensible):
 
         # Add checkpoint extensions. By dfeault, will load the latest checkpoint if available
         self.add_extension(
-            "checkpoint_saver",
-            CheckpointSaver(path=self.train_dir / "checkpoints"),
-            at_start=False,
-            as_default=True,
+            "checkpoint_saver", CheckpointSaver(), at_start=False, as_default=True
         )
         self.add_extension(
-            "checkpoint_loader",
-            CheckpointLoader(path=self.train_dir / "checkpoints", ckpt_num=-1),
-            at_start=False,
-            as_default=True,
+            "checkpoint_loader", CheckpointLoader(), at_start=False, as_default=True
         )
         self.add_extension("eval_state", EvalState(), at_start=True, as_default=True)
+        self.add_extension("setup", Setup(), at_start=True, as_default=True)
 
     @reentrant_context_manager
     def run_stage(self, *args, **kwargs):
@@ -121,19 +116,6 @@ class TrainManager(Extensible):
         """
         with self.staged("run", *args, **kwargs):
             yield
-
-    def train_setup(self):
-        """
-        This method 1) moves the model to the device and
-        2) builds the optimizer if it was provided as a callable.
-        """
-        self.model = self.model.to(self.device)
-        self.fixtures(self.initialize_params)
-        if not isinstance(self.optimizer, torch.optim.Optimizer):
-            self.optimizer = self.optimizer(self.model.parameters())
-
-    def standalone_eval_setup(self):
-        self.model = self.model.to(self.device)
 
     def get_true_batch_size(self, batch: Batch) -> int:
         """
@@ -224,8 +206,6 @@ class TrainManager(Extensible):
         with self.run_stage({"epoch_num": 0, "standalone_eval": True}), self.staged(
             "eval"
         ), self.mode("eval"):
-            if self.fixtures["standalone_eval"]:
-                self.standalone_eval_setup()
             #
             for datasource_name, datasource in (eval_data or self.eval_data).items():
                 with self.staged(
@@ -256,7 +236,6 @@ class TrainManager(Extensible):
             if self.fixtures["epoch_num"] == 0:
                 # Extension CheckpointSaver could have set `epoch_num`
                 # to a value other than zero
-                self.train_setup()
                 self.eval()
 
             # Train

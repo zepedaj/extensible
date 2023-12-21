@@ -2,13 +2,50 @@ from ..defs import *
 from .extension import Extension
 
 
+class Setup(Extension):
+
+    """
+    Basic train manager setup.
+    """
+
+    def pre_run(self, train_manager, standalone_eval):
+        """
+        Basic train manager setup. This hook
+
+        #. moves the model to the device,
+        #. builds the optimizer if it was provided as a callable, passing in all model parameters and
+
+        """
+        # TODO: Is there a way to avoid copying these uninitialized weights?
+        train_manager.model = train_manager.model.to(train_manager.device)
+        if not standalone_eval and not isinstance(
+            train_manager.optimizer, torch.optim.Optimizer
+        ):
+            train_manager.optimizer = train_manager.optimizer(
+                train_manager.model.parameters()
+            )
+
+    def post_load_checkpoint(self, checkpoint_loaded, fixtures, train_manager):
+        """
+        Initializes weights if no checkpoint was loaded.
+        """
+        if not checkpoint_loaded:
+            fixtures(train_manager.initialize_params)
+
+
 class EvalState(Extension):
     """
     Exposes the following fixtures:
 
-    * **num_batches**: The cumulative number of batches currently visited during an evaluation epoch.
-    * **num_samples**: The cumulative number of samples currently visited during an evaluation epoch.
-    * **cum_loss**: The sum of all losses for all batches currently visited during an evalution epohc.
+    Fixtures
+        num_batches
+            The cumulative number of batches currently visited during an evaluation epoch.
+
+        num_samples
+            The cumulative number of samples currently visited during an evaluation epoch.
+
+        cum_loss
+            The sum of all losses for all batches currently visited during an evalution epoch.
 
     Adds the following visualization at the end of the epoch:
 
