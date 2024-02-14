@@ -2,7 +2,38 @@
 Train Manager: Extensible ML methods
 ---------------------------------------------
 
-Train Manager addresses a common organization issue in machine learning routines where the algorithm, visualization and book keeping code are intertwined in the same code block, making it difficult to add new components. The main reason for this is the need to address variables that occur at specific places in the routine (e.g., the batch, prediction or loss).
+Train Manager enables better *code organization* of *machine learning training experiments* by means of **extensible methods** and **fixtures**, making it possible to create reusable modules with common functionality like the built-in training, visualization, model graph debugging, and reproducibility tracking modules.
+
+Extensible methods
+    *Extensible methods* are Python methods that can be extended by injecting code (i.e., calling *extensions methods*) before and after pre-defined stages
+
+Fixtures
+    Fixtures are scoped variables that exist during a given stage and are available to extension methods called during that stage
+
+.. code-block::
+
+    class MyExtension(Extension):
+
+        def pre_stage(self, var_a):
+            print('Before the stage')
+
+        def post_stage(self, var_a, var_b):
+            print('After the stage: {var_a}, {var_b}')
+
+
+    class MyExtensibleClass(Extensible):
+
+        extensions = [MyExtension()]
+
+        def my_extensible_method(self):
+            with staged('my_stage', {'var_a':1}):
+                self.fixtures['var_b'] = 2
+
+In the example above, calling ``MyExtendedClass.my_extensible_method`` will call ``MyExtension.pre_stage`` and ``MyExtension.post_stage`` before and after the staged context code ``'my_stage'``, automatically passing in the variable values defined within stage `my_stage'
+
+
+
+A common problem in training code is that the algorithm, visualization and book keeping code are intertwined in the same code block, making it difficult to add new components. The main reason for this is the need to address variables that occur at specific places in the routine (e.g., the batch, prediction or loss).
 
 Train Manager addresses this by means of **extensible methods** that are structured into nested stages. Extensions can be added to the callable in question without modifying its code by declaring classes with hook methods that have special names specifying whether they will execute before or after a given stage.
 
