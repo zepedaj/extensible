@@ -5,14 +5,14 @@ from dataclasses import InitVar, dataclass, field
 from datetime import datetime
 from pathlib import Path
 from typing import Callable, Dict, Optional, Union
-from pglib.contextlib import reentrant_context_manager
+from jztools.contextlib import reentrant_context_manager
 import ploteries
 import torch.optim
 from torch import nn
-from torch_train_manager_2.extensions.checkpoints import CheckpointLoader
+from extensible.extensions.checkpoints import CheckpointLoader
 from tqdm import tqdm
 
-from torch_train_manager_2.extensions import CheckpointSaver, EvalState, Setup
+from extensible.extensions import CheckpointSaver, EvalState, Setup
 from .defs import *
 from .extensible import Extensible, Extension
 

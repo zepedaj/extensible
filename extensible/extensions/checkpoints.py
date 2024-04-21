@@ -1,7 +1,7 @@
 from pathlib import Path
 from typing import Iterable, Optional, Tuple
 
-from torch_train_manager_2.extensible import FixturesDict
+from extensible.extensible import FixturesDict
 from ..defs import *
 from .extension import Extension
 import torch

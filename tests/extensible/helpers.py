@@ -2,7 +2,7 @@ from contextlib import contextmanager
 from pathlib import Path
 from tempfile import TemporaryDirectory
 import torch
-from torch_train_manager_2 import TrainManager
+from extensible import TrainManager
 
 
 def loss(batch, prediction):

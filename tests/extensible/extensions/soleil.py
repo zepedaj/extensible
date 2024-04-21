@@ -5,22 +5,22 @@ import numpy as np
 import numpy.testing as npt
 from soleil import load_solconf
 from soleil.package import package_from_serializable
-from torch_train_manager_2.extensions import soleil as mdl
-from torch_train_manager_2.extensions.extension import Extension
+from extensible.extensions import soleil as mdl
+from extensible.extensions.extension import Extension
 from .. import helpers
 from .checkpoints import EpochsGatherer, StateSaver
 
 solconf_package = {
     "main.solconf": """
 from soleil.solconf import *
-from torch_train_manager_2.extensions.soleil import SoleilCheckpointSaver
+from extensible.extensions.soleil import SoleilCheckpointSaver
 import torch.nn
-from tests.torch_train_manager_2.extensions.checkpoints import EpochsGatherer, StateSaver
-from tests.torch_train_manager_2.extensions.soleil import LossGatherer
+from tests.extensible.extensions.checkpoints import EpochsGatherer, StateSaver
+from tests.extensible.extensions.soleil import LossGatherer
 
 torch.manual_seed(0)
 datasource:hidden = [torch.rand(10, 100) for _ in range(20)]
-type: as_type = "torch_train_manager_2:TrainManager"
+type: as_type = "extensible:TrainManager"
 model = torch.nn.Linear(100, 30)
 loss = lambda batch, prediction: prediction.sum()
 epochs = 7

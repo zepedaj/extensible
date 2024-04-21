@@ -1,7 +1,7 @@
 from collections import defaultdict
 import torch
-from torch_train_manager_2.extensions.default import Extension
-from torch_train_manager_2.train_manager import TrainManager
+from extensible.extensions.default import Extension
+from extensible.train_manager import TrainManager
 
 TAB_NAME = "grads"
 

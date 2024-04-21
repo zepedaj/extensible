@@ -1,4 +1,4 @@
-from torch_train_manager_2 import extensible as mdl
+from extensible import extensible as mdl
 import torch.nn
 from . import helpers
 

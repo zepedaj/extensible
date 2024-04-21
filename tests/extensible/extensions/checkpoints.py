@@ -1,7 +1,7 @@
 from copy import deepcopy
 import numpy as np
 import numpy.testing as npt
-from torch_train_manager_2 import extensions as mdl
+from extensible import extensions as mdl
 from .. import helpers
 
 
